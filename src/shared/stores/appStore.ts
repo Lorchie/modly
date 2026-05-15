@@ -107,6 +107,10 @@ interface AppState {
   redoMesh: () => void
   clearMeshHistory: () => void
 
+  // UI preferences
+  showRamIndicator: boolean
+  setShowRamIndicator: (v: boolean) => void
+
   // Actions
   initApp: () => Promise<void>
   setCurrentJob: (job: GenerationJob | null) => void
@@ -198,6 +202,9 @@ export const useAppStore = create<AppState>()(
 
       clearMeshHistory: () => set({ meshHistory: [], historyIndex: -1 }),
 
+      showRamIndicator: true,
+      setShowRamIndicator: (v) => set({ showRamIndicator: v }),
+
       currentJob: null,
       selectedImagePath: null,
       setSelectedImagePath: (path) => set({ selectedImagePath: path }),
@@ -246,6 +253,7 @@ export const useAppStore = create<AppState>()(
       name: 'modly-store',
       partialize: (state) => ({
         generationOptions: state.generationOptions,
+        showRamIndicator: state.showRamIndicator,
       }),
     }
   )

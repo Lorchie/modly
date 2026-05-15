@@ -4,10 +4,22 @@ import { AboutSection }        from './components/AboutSection'
 import { LogsSection }         from './components/LogsSection'
 import { IntegrationsSection } from './components/IntegrationsSection'
 import { AgentSection }        from './components/AgentSection'
+import { ApplicationSection }  from './components/ApplicationSection'
 
-type Section = 'storage' | 'integrations' | 'agent' | 'logs' | 'about'
+type Section = 'application' | 'storage' | 'integrations' | 'agent' | 'logs' | 'about'
 
 const SECTIONS: { id: Section; label: string; icon: JSX.Element }[] = [
+  {
+    id: 'application',
+    label: 'Application',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07" />
+      </svg>
+    )
+  },
   {
     id: 'storage',
     label: 'Storage',
@@ -68,7 +80,7 @@ const SECTIONS: { id: Section; label: string; icon: JSX.Element }[] = [
 // ─── Page shell ───────────────────────────────────────────────────────────────
 
 export default function SettingsPage(): JSX.Element {
-  const [section, setSection] = useState<Section>('storage')
+  const [section, setSection] = useState<Section>('application')
 
   return (
     <div className="flex h-full">
@@ -96,6 +108,7 @@ export default function SettingsPage(): JSX.Element {
       {/* Content */}
       <div className="flex-1 overflow-y-auto bg-surface-400">
         <div className="p-8">
+          {section === 'application'   && <ApplicationSection />}
           {section === 'storage'      && <StorageSection />}
           {section === 'integrations' && <IntegrationsSection />}
           {section === 'agent'        && <AgentSection />}

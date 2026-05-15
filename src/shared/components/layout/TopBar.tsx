@@ -2,7 +2,7 @@ import { useAppStore } from '@shared/stores/appStore'
 import MemoryIndicator from './MemoryIndicator'
 
 export default function TopBar(): JSX.Element {
-  const { patchUpdateReady, platform } = useAppStore()
+  const { patchUpdateReady, platform, showRamIndicator } = useAppStore()
   const isMac = platform === 'darwin'
 
   const handleMinimize = () => window.electron.window.minimize()
@@ -34,7 +34,7 @@ export default function TopBar(): JSX.Element {
       <div className="flex-1" />
 
       {/* Memory indicator */}
-      <MemoryIndicator />
+      {showRamIndicator && <MemoryIndicator />}
 
       {/* Patch update badge */}
       {patchUpdateReady && (
