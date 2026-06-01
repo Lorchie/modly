@@ -6,8 +6,11 @@ import { UpdateModal } from '@shared/components/ui/UpdateModal'
 import { ErrorModal } from '@shared/components/ui/ErrorModal'
 import { Toast } from '@shared/components/ui/Toast'
 
+type TextSize = 'small' | 'medium' | 'large'
+const TEXT_SIZE_SCALE: Record<TextSize, number> = { small: 0.875, medium: 1, large: 1.25 }
+
 export default function App(): JSX.Element {
-  const { checkSetup, setupStatus, initApp, backendStatus, showError } = useAppStore()
+  const { checkSetup, setupStatus, initApp, backendStatus, showError, useAtkinsonFont, textSize } = useAppStore()
   const [updateVersion, setUpdateVersion] = useState<string | null>(null)
   const [currentVersion, setCurrentVersion] = useState<string>('')
 
@@ -22,6 +25,17 @@ export default function App(): JSX.Element {
       window.electron.updater.offMajorMinorAvailable()
     }
   }, [])
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty(
+      '--app-font',
+      useAtkinsonFont
+        ? "'Atkinson Hyperlegible', system-ui, sans-serif"
+        : "'Inter', system-ui, sans-serif"
+    )
+    root.style.setProperty('--app-font-scale', String(TEXT_SIZE_SCALE[textSize as TextSize]))
+  }, [useAtkinsonFont, textSize])
 
   useEffect(() => {
     if (setupStatus === 'done') initApp()

@@ -111,6 +111,12 @@ interface AppState {
   showRamIndicator: boolean
   setShowRamIndicator: (v: boolean) => void
 
+  // Accessibility
+  useAtkinsonFont: boolean
+  setUseAtkinsonFont: (v: boolean) => void
+  textSize: 'small' | 'medium' | 'large'
+  setTextSize: (v: 'small' | 'medium' | 'large') => void
+
   // Actions
   initApp: () => Promise<void>
   setCurrentJob: (job: GenerationJob | null) => void
@@ -205,6 +211,11 @@ export const useAppStore = create<AppState>()(
       showRamIndicator: true,
       setShowRamIndicator: (v) => set({ showRamIndicator: v }),
 
+      useAtkinsonFont: false,
+      setUseAtkinsonFont: (v) => set({ useAtkinsonFont: v }),
+      textSize: 'medium',
+      setTextSize: (v) => set({ textSize: v }),
+
       currentJob: null,
       selectedImagePath: null,
       setSelectedImagePath: (path) => set({ selectedImagePath: path }),
@@ -254,6 +265,8 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         generationOptions: state.generationOptions,
         showRamIndicator: state.showRamIndicator,
+        useAtkinsonFont: state.useAtkinsonFont,
+        textSize: state.textSize,
       }),
     }
   )
