@@ -21,9 +21,25 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+def _int_env(primary: str, fallback: str, default: int) -> int:
+    value = os.environ.get(primary, os.environ.get(fallback, str(default)))
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_env(primary: str, fallback: str, default: float) -> float:
+    value = os.environ.get(primary, os.environ.get(fallback, str(default)))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 DEFAULT_BASE_URL = os.environ.get("MODLY_API_URL", "http://127.0.0.1:8765")
-DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("MODLY_CLI_TIMEOUT", os.environ.get("MODLY_AGENT_TIMEOUT", "1800")))
-DEFAULT_POLL_SECONDS = float(os.environ.get("MODLY_CLI_POLL_SECONDS", os.environ.get("MODLY_AGENT_POLL_SECONDS", "2")))
+DEFAULT_TIMEOUT_SECONDS = _int_env("MODLY_CLI_TIMEOUT", "MODLY_AGENT_TIMEOUT", 1800)
+DEFAULT_POLL_SECONDS = _float_env("MODLY_CLI_POLL_SECONDS", "MODLY_AGENT_POLL_SECONDS", 2.0)
 EXPORT_FORMATS = ("glb", "stl", "obj", "ply")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 WORKFLOW_ASSET_SUFFIXES = {".glb", ".gltf", ".obj", ".stl", ".ply"}
@@ -118,11 +134,31 @@ def _workspace_relative_path(output_url: str) -> str:
     path = parsed.path if parsed.scheme else output_url
     prefix = "/workspace/"
     if path.startswith(prefix):
-        return urllib.parse.unquote(path[len(prefix):])
-    return urllib.parse.unquote(path.lstrip("/"))
+        return _validate_workspace_path(urllib.parse.unquote(path[len(prefix):]))
+    return _validate_workspace_path(urllib.parse.unquote(path))
+
+
+def _is_windows_drive_component(component: str) -> bool:
+    return len(component) >= 2 and component[0].isalpha() and component[1] == ":"
+
+
+def _validate_workspace_path(workspace_path: str) -> str:
+    value = str(workspace_path)
+    normalized = value.replace("\\", "/")
+    parts = normalized.split("/")
+    if (
+        not value
+        or value.startswith(("/", "\\"))
+        or urllib.parse.urlparse(value).scheme
+        or any(part == ".." for part in parts)
+        or any(_is_windows_drive_component(part) for part in parts)
+    ):
+        raise ModlyCliError(f"Invalid workspace path: {workspace_path}", code="INVALID_WORKSPACE_PATH")
+    return value
 
 
 def _export_workspace_path(base_url: str, workspace_path: str, fmt: str, dest: Path, *, timeout: float) -> int:
+    workspace_path = _validate_workspace_path(workspace_path)
     export_url = f"{base_url.rstrip('/')}/export/{urllib.parse.quote(fmt)}?{urllib.parse.urlencode({'path': workspace_path})}"
     return _download(export_url, dest, timeout=timeout)
 
@@ -163,12 +199,19 @@ def _validate_model_id(base_url: str, request_timeout: float, model_id: str, mod
     return model_id
 
 
-def _recovery_meta(base_url: str, run_id: str, *, legacy: bool = False, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def _recovery_meta(base_url: str, run_id: str, *, legacy: bool = False, kind: str = "workflow-run", extra: dict[str, Any] | None = None) -> dict[str, Any]:
     prefix = "python tools/modly-cli/agent.py"
     if base_url.rstrip("/") != DEFAULT_BASE_URL.rstrip("/"):
         prefix = f"{prefix} --base-url {base_url.rstrip('/')}"
-    group = "legacy job" if legacy else "workflow-run status"
-    cancel = "legacy cancel" if legacy else "workflow-run cancel"
+    if legacy:
+        group = "legacy job"
+        cancel = "legacy cancel"
+    elif kind == "process-run":
+        group = "process-run status"
+        cancel = "process-run cancel"
+    else:
+        group = "workflow-run status"
+        cancel = "workflow-run cancel"
     meta = {
         "status_command": f"{prefix} {group} {run_id}",
         "cancel_command": f"{prefix} {cancel} {run_id}",
@@ -987,16 +1030,18 @@ def cmd_batch(args: argparse.Namespace) -> int:
     results: list[dict[str, Any]] = []
     failures = 0
     original_format = args.format
-    for image, output, fmt in jobs:
-        args.format = fmt
-        try:
-            results.append(_generate_one(args, image, output))
-        except ModlyCliError as exc:
-            failures += 1
-            results.append({"ok": False, "image": str(image), "error": str(exc)})
-            if not args.continue_on_error:
-                break
-    args.format = original_format
+    try:
+        for image, output, fmt in jobs:
+            args.format = fmt
+            try:
+                results.append(_generate_one(args, image, output))
+            except ModlyCliError as exc:
+                failures += 1
+                results.append({"ok": False, "image": str(image), "error": str(exc)})
+                if not args.continue_on_error:
+                    break
+    finally:
+        args.format = original_format
     _json_print({"ok": failures == 0, "count": len(results), "failures": failures, "results": results}, compact=args.compact)
     return 0 if failures == 0 else 1
 
@@ -1061,11 +1106,7 @@ def cmd_process_run_start(args: argparse.Namespace) -> int:
     run_id = data.get("run_id") if isinstance(data, dict) else None
     output = {"ok": True, "base_url": base_url, "run": {"kind": "processRun", "id": str(run_id) if run_id else ""}, "status": data}
     if run_id:
-        output["meta"] = {
-            "status_command": f"python tools/modly-cli/agent.py process-run status {run_id}",
-            "cancel_command": f"python tools/modly-cli/agent.py process-run cancel {run_id}",
-            "legacy": False,
-        }
+        output["meta"] = _recovery_meta(base_url, str(run_id), kind="process-run")
     _json_print(output, compact=args.compact)
     return 0
 
@@ -1281,6 +1322,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_generation_options(wf_alias, image=False, output=True)
     wf_alias.set_defaults(func=cmd_generate_from_workflow)
     hidden = {"status", "export", "batch", "models", "params", "job", "cancel", "serve", "ensure-server", "comfy-image", "generate-from-workflow"}
+    # Hide compatibility aliases from help; argparse only exposes this via a private list.
     sub._choices_actions = [choice for choice in sub._choices_actions if getattr(choice, "dest", None) not in hidden]
     return parser
 
@@ -1297,6 +1339,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         _json_print({"ok": False, "code": "INTERRUPTED", "message": "interrupted", "error": "interrupted"}, compact=getattr(args, "compact", False) if args else False)
         return 130
+    except Exception as exc:
+        _json_print({"ok": False, "code": "UNEXPECTED_ERROR", "message": str(exc), "error": str(exc)}, compact=getattr(args, "compact", False) if args else False)
+        return 1
 
 
 if __name__ == "__main__":

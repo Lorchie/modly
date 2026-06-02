@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -96,6 +97,35 @@ class CommandTests(unittest.TestCase):
             download.assert_called_once()
             self.assertIn("/export/glb?path=Agent%2Ffoo.glb", download.call_args.args[0])
             self.assertEqual(json.loads(buf.getvalue())["bytes_written"], 123)
+
+    def test_export_rejects_unsafe_workspace_paths(self) -> None:
+        bad_paths = [
+            "../secret.glb",
+            "Agent/../secret.glb",
+            "/Agent/foo.glb",
+            "C:/Agent/foo.glb",
+            "C:\\Agent\\foo.glb",
+            "\\\\server\\share\\foo.glb",
+        ]
+        with patch.object(agent, "_download", side_effect=AssertionError("unsafe path should not be downloaded")):
+            for bad_path in bad_paths:
+                with self.subTest(path=bad_path):
+                    with self.assertRaises(agent.ModlyCliError) as ctx:
+                        agent._export_workspace_path("http://example.test", bad_path, "glb", Path("out.glb"), timeout=1)
+                    self.assertEqual(ctx.exception.code, "INVALID_WORKSPACE_PATH")
+
+    def test_workspace_relative_path_rejects_unsafe_server_output(self) -> None:
+        bad_urls = [
+            "/workspace/../secret.glb",
+            "/workspace/C:/secret.glb",
+            "/workspace/Agent/%2E%2E/secret.glb",
+            "http://example.test/workspace//absolute.glb",
+        ]
+        for bad_url in bad_urls:
+            with self.subTest(url=bad_url):
+                with self.assertRaises(agent.ModlyCliError) as ctx:
+                    agent._workspace_relative_path(bad_url)
+                self.assertEqual(ctx.exception.code, "INVALID_WORKSPACE_PATH")
 
     def test_generate_uses_workflow_run_and_recovery_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -193,6 +223,38 @@ class CommandTests(unittest.TestCase):
                 agent.cmd_process_run_status(proc_args)
         self.assertEqual(cap_ctx.exception.code, "UNSUPPORTED_PROCESS")
         self.assertEqual(proc_ctx.exception.code, "UNSUPPORTED_PROCESS")
+
+    def test_process_run_start_uses_recovery_meta_with_custom_base_url(self) -> None:
+        def fake_request(method: str, url: str, *, timeout: float, **_: object) -> object:
+            if url.endswith("/health"):
+                return {"status": "ok"}
+            if url.endswith("/process-runs"):
+                return {"run_id": "proc-1", "status": "queued"}
+            raise AssertionError(url)
+
+        args = SimpleNamespace(
+            base_url="http://custom.test",
+            request_timeout=1,
+            input_json="{}",
+            input_file=None,
+            process="texture",
+            compact=True,
+        )
+        with patch.object(agent, "_request_json", fake_request), redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(agent.cmd_process_run_start(args), 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("--base-url http://custom.test", payload["meta"]["status_command"])
+        self.assertIn("--base-url http://custom.test", payload["meta"]["cancel_command"])
+
+    def test_main_converts_unexpected_exceptions_to_json(self) -> None:
+        def boom(_args: object) -> int:
+            raise RuntimeError("boom")
+
+        with patch.object(agent, "cmd_health", boom), redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(agent.main(["health"]), 1)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["code"], "UNEXPECTED_ERROR")
+        self.assertEqual(payload["message"], "boom")
 
     def test_generate_from_workflow_downloads_direct_asset_without_modly_health(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -398,6 +460,15 @@ class ServeConfigTests(unittest.TestCase):
 
             with patch.object(agent, "_windows_env_paths", return_value=[bad_roaming, good_roaming]):
                 self.assertEqual(agent._load_modly_settings()["workspaceDir"], "C:/workspace")
+
+    def test_malformed_timeout_environment_does_not_break_module_import(self) -> None:
+        spec = importlib.util.spec_from_file_location("modly_agent_bad_env", MODULE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        with patch.dict(os.environ, {"MODLY_CLI_TIMEOUT": "not-int", "MODLY_CLI_POLL_SECONDS": "not-float"}):
+            spec.loader.exec_module(module)
+        self.assertEqual(module.DEFAULT_TIMEOUT_SECONDS, 1800)
+        self.assertEqual(module.DEFAULT_POLL_SECONDS, 2.0)
 
     def test_resolve_serve_config_explicit_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:
