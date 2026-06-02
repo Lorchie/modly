@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export type UiScale = 'small' | 'medium' | 'large'
 export type BackendStatus = 'not_started' | 'starting' | 'ready' | 'error'
 export type SetupStatus = 'idle' | 'checking' | 'needed' | 'installing' | 'done' | 'error'
 export interface SetupProgress { step: string; percent: number; currentPackage?: string }
@@ -114,8 +115,8 @@ interface AppState {
   // Accessibility
   useAtkinsonFont: boolean
   setUseAtkinsonFont: (v: boolean) => void
-  textSize: 'small' | 'medium' | 'large'
-  setTextSize: (v: 'small' | 'medium' | 'large') => void
+  uiScale: UiScale
+  setUiScale: (v: UiScale) => void
 
   // Actions
   initApp: () => Promise<void>
@@ -213,8 +214,8 @@ export const useAppStore = create<AppState>()(
 
       useAtkinsonFont: false,
       setUseAtkinsonFont: (v) => set({ useAtkinsonFont: v }),
-      textSize: 'medium',
-      setTextSize: (v) => set({ textSize: v }),
+      uiScale: 'medium',
+      setUiScale: (v) => set({ uiScale: v }),
 
       currentJob: null,
       selectedImagePath: null,
@@ -266,7 +267,7 @@ export const useAppStore = create<AppState>()(
         generationOptions: state.generationOptions,
         showRamIndicator: state.showRamIndicator,
         useAtkinsonFont: state.useAtkinsonFont,
-        textSize: state.textSize,
+        uiScale: state.uiScale,
       }),
     }
   )

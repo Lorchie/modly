@@ -2,7 +2,7 @@ import { useAppStore } from '@shared/stores/appStore'
 import { Section, Card, Row, Toggle, SegmentedControl } from '@shared/ui'
 
 export function AccessibilitySection(): JSX.Element {
-  const { useAtkinsonFont, setUseAtkinsonFont, textSize, setTextSize } = useAppStore()
+  const { useAtkinsonFont, setUseAtkinsonFont, uiScale, setUiScale } = useAppStore()
 
   return (
     <Section title="Accessibility" subtitle="Make Modly easier to read and use.">
@@ -17,14 +17,15 @@ export function AccessibilitySection(): JSX.Element {
           </Row>
         </Card>
 
-        <Card title="Text Size" description="Adjust the size of text across the app.">
+        <Card title="Interface Scale" description="Zoom the whole interface up or down.">
           <Row
             label="Scale"
-            description="Applies to all text in the interface."
+            description="Applies to all text, icons, and spacing."
           >
             <SegmentedControl
-              value={textSize}
-              onChange={setTextSize}
+              ariaLabel="Interface scale"
+              value={uiScale}
+              onChange={setUiScale}
               options={[
                 { value: 'small',  label: 'Small'  },
                 { value: 'medium', label: 'Medium' },

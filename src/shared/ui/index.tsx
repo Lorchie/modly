@@ -110,18 +110,21 @@ export function Select({ value, onChange, options }: {
   )
 }
 
-export function SegmentedControl<T extends string>({ value, onChange, options }: {
+export function SegmentedControl<T extends string>({ value, onChange, options, ariaLabel }: {
   value: T
   onChange: (v: T) => void
   options: { value: T; label: string }[]
+  ariaLabel?: string
 }): JSX.Element {
   return (
-    <div className="inline-flex p-0.5 rounded-lg bg-zinc-800 border border-zinc-700">
+    <div role="group" aria-label={ariaLabel} className="inline-flex p-0.5 rounded-lg bg-zinc-800 border border-zinc-700">
       {options.map((o) => {
         const active = o.value === value
         return (
           <button
             key={o.value}
+            type="button"
+            aria-pressed={active}
             onClick={() => onChange(o.value)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               active
