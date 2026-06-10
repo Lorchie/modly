@@ -11,6 +11,7 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree as any
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree as any
 THREE.Mesh.prototype.raycast = acceleratedRaycast
+import SplatViewer, { type SplatViewerHandle } from './SplatViewer'
 import { useGeneration } from '@shared/hooks/useGeneration'
 import { useAppStore } from '@shared/stores/appStore'
 import { ViewerToolbar, type ViewMode } from './ViewerToolbar'
@@ -392,11 +393,23 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS }: { l
   const selected = useAppStore((s) => s.meshSelected)
   const setSelected = useAppStore((s) => s.setMeshSelected)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const splatRef = useRef<SplatViewerHandle | null>(null)
 
+  const outputUrl = currentJob?.outputUrl ?? ''
   const modelUrl =
     currentJob?.status === 'done' && currentJob.outputUrl
       ? `${apiUrl}${currentJob.outputUrl}`
       : null
+
+  // A .ply/.splat reaching the viewer is always a Gaussian splat here: mesh
+  // plys are converted to GLB on import and workflow mesh outputs are .glb.
+  const isSplat = /\.(ply|splat)$/i.test(outputUrl)
+
+  // The splat viewer needs binary .splat — route raw workspace .ply through the
+  // conversion endpoint; import URLs already point at a .splat via serve-file.
+  const splatUrl = outputUrl.startsWith('/workspace/')
+    ? `${apiUrl}/optimize/ply-to-splat?path=${encodeURIComponent(outputUrl.slice('/workspace/'.length))}`
+    : modelUrl
 
   // Reset view state when model changes
   useEffect(() => {
@@ -423,11 +436,13 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS }: { l
   }, [selected, setCurrentJob])
 
   const handleScreenshot = () => {
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const dataUrl = isSplat
+      ? splatRef.current?.screenshot() ?? null
+      : canvasRef.current?.toDataURL('image/png') ?? null
+    if (!dataUrl) return
     const link = document.createElement('a')
     link.download = `modly-${Date.now()}.png`
-    link.href = canvas.toDataURL('image/png')
+    link.href = dataUrl
     link.click()
   }
 
@@ -437,6 +452,13 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS }: { l
       <div className="relative w-full h-full bg-surface-400">
         {!modelUrl && <EmptyState />}
 
+        {/* Splat path → fully isolated viewer (mkkellogg, outside R3F) */}
+        {modelUrl && isSplat && splatUrl ? (
+          <SplatViewer ref={splatRef} url={splatUrl} autoRotate={autoRotate} />
+        ) : null}
+
+        {/* Mesh path → original Canvas, unchanged */}
+        {!isSplat && (
         <Canvas
           onPointerMissed={() => setSelected(false)}
           camera={{ position: [0, 1.5, 4], fov: 45 }}
@@ -507,6 +529,7 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS }: { l
             <GizmoBubbles />
           </GizmoHelper>
         </Canvas>
+        )}
 
         {/* Left toolbar — visible only when a model is loaded */}
         {modelUrl && (
@@ -516,6 +539,7 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS }: { l
             onViewMode={setViewMode}
             onAutoRotate={() => setAutoRotate((v) => !v)}
             onScreenshot={handleScreenshot}
+            showViewModes={!isSplat}
           />
         )}
 
