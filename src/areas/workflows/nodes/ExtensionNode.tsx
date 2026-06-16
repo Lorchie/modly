@@ -157,7 +157,10 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
   }, [isMulti])
 
   const patchParam = useCallback((key: string, val: number | string) => {
-    updateNodeData(id, { params: { ...data.params, [key]: val } })
+    const params = { ...data.params, [key]: val }
+    updateNodeData(id, { params })
+    // Push live so a paused/looping run picks up the change on the next node start.
+    useWorkflowRunStore.getState().setLiveNodeParams(id, params)
   }, [id, data.params, updateNodeData])
 
   const paramById = new Map(ext?.params.map((p) => [p.id, p]))

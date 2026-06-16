@@ -79,14 +79,21 @@ export interface WFNodeData {
   inputType?:      'image' | 'text'
   enabled:         boolean
   showInGenerate?: boolean
+  iterations?:     number   // While container: auto-loop N times (omit/0 = manual only)
   params:          Record<string, unknown>
 }
 
 export interface WFNode {
-  id:       string
-  type:     string
-  position: { x: number; y: number }
-  data:     WFNodeData
+  id:        string
+  type:      string
+  position:  { x: number; y: number }
+  data:      WFNodeData
+  // Sub-flow / group support (While container)
+  parentId?: string
+  extent?:   'parent'
+  width?:    number
+  height?:   number
+  style?:    Record<string, unknown>
 }
 
 export interface WFEdge {

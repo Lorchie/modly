@@ -26,6 +26,11 @@ const IDLE: WorkflowRunState = {
 const _cancel      = { current: false }
 const _activeJobId = { current: null as string | null }
 const _resume      = { current: null as (() => void) | null }
+// Set by retryRun() before resuming so the paused While node knows to loop back
+const _retry       = { current: false }
+// Live node params — the UI pushes edits here so a paused/looping run re-reads
+// the latest values when a node starts (instead of the snapshot from run start).
+const _liveParams  = { current: new Map<string, Record<string, unknown>>() }
 
 function flushResume(): void {
   const fn = _resume.current
@@ -72,6 +77,9 @@ interface WorkflowRunStore {
   cancel:      () => void
   reset:       () => void
   continueRun: () => void
+  retryRun:    () => void
+  /** UI → runner: push the latest params for a node so a looping run uses them */
+  setLiveNodeParams: (nodeId: string, params: Record<string, unknown>) => void
 }
 
 export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
@@ -82,6 +90,8 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
 
   async run(workflow, allExtensions, overrideImageData?) {
     _cancel.current = false
+    // Seed live params from the snapshot; UI edits during the run override these.
+    _liveParams.current = new Map(workflow.nodes.map((n) => [n.id, { ...(n.data.params ?? {}) }]))
 
     const appState     = useAppStore.getState()
     const apiUrl       = appState.apiUrl
@@ -89,6 +99,28 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
     const execNodes    = ordered.filter((n) =>
       (n.type === 'extensionNode' || n.type === 'waitNode') && n.data.enabled,
     )
+
+    // ── While containers → loop ranges over the body nodes they wrap ──────
+    // A While node's body = the exec nodes parented to it. We re-run that
+    // contiguous-ish range either N times (data.iterations) or on Retry.
+    interface LoopInfo { whileId: string; firstIdx: number; lastIdx: number; iterations: number | null }
+    const loops: LoopInfo[] = []
+    for (const w of workflow.nodes) {
+      if (w.type !== 'whileNode') continue
+      const idxs = execNodes.reduce<number[]>((acc, n, idx) => {
+        if (n.parentId === w.id) acc.push(idx)
+        return acc
+      }, [])
+      if (idxs.length === 0) continue
+      const iters = Number(w.data?.iterations)
+      loops.push({
+        whileId:    w.id,
+        firstIdx:   Math.min(...idxs),
+        lastIdx:    Math.max(...idxs),
+        iterations: Number.isFinite(iters) && iters > 0 ? Math.floor(iters) : null,
+      })
+    }
+    const loopCounters = new Map(loops.map((l) => [l.whileId, l.iterations]))
 
     const selectedImagePath = appState.selectedImagePath ?? undefined
     const selectedImageData = overrideImageData ?? appState.selectedImageData ?? undefined
@@ -154,11 +186,38 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
         }
       }
 
+      // End-of-body handler for While containers. Runs after *any* node type
+      // (including Wait) so a Wait placed last in a loop body still re-loops.
+      // Returns the index to jump back to, 'cancel', or undefined to continue.
+      const handleLoopEnd = async (idx: number): Promise<number | 'cancel' | undefined> => {
+        const loop = loops.find((l) => l.lastIdx === idx)
+        if (!loop) return undefined
+        const remaining = loopCounters.get(loop.whileId)
+        if (remaining != null && remaining > 1) {
+          loopCounters.set(loop.whileId, remaining - 1)
+          set((s) => ({ runState: { ...s.runState, blockStep: `Looping… ${remaining - 1} left` } }))
+          return loop.firstIdx
+        }
+        if (remaining == null) {
+          _retry.current = false
+          set({ activeNodeId: loop.whileId })
+          set((s) => ({ runState: { ...s.runState, status: 'paused', blockStep: 'Paused — Continue or Retry' } }))
+          await new Promise<void>((resolve) => { _resume.current = resolve })
+          if (_cancel.current) return 'cancel'
+          set((s) => ({ runState: { ...s.runState, status: 'running' } }))
+          if (_retry.current) { _retry.current = false; return loop.firstIdx }
+        }
+        return undefined   // counter exhausted → exit loop
+      }
+
       for (let i = 0; i < execNodes.length; i++) {
         if (_cancel.current) { set({ runState: IDLE, activeNodeId: null }); return }
 
         const node = execNodes[i]
         const ext  = getWorkflowExtension(node.data.extensionId ?? '', allExtensions)
+        // Read the freshest params at the moment the node starts (so Retry/loops
+        // pick up edits made while paused, not the values from run start).
+        const liveParams = _liveParams.current.get(node.id) ?? node.data.params ?? {}
 
         // ── Resolve inputs ────────────────────────────────────────────────
         let nodeInputPath:     string | undefined
@@ -203,6 +262,11 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
             outputType: incomingEdges[0] ? nodeOutputs.get(incomingEdges[0].source)?.outputType : undefined,
           })
           set((s) => ({ runState: { ...s.runState, status: 'running' } }))
+
+          // A Wait can be the last node of a While body → still run the loop check.
+          const jump = await handleLoopEnd(i)
+          if (jump === 'cancel') { set({ runState: IDLE, activeNodeId: null }); return }
+          if (jump !== undefined) { i = jump - 1 }
           continue
         }
 
@@ -237,7 +301,7 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           const schemaDefaults = Object.fromEntries(
             (ext.params ?? []).map((p) => [p.id, p.default]),
           )
-          const effectiveParams = { ...schemaDefaults, ...(node.data.params ?? {}) }
+          const effectiveParams = { ...schemaDefaults, ...liveParams }
 
           const fd = new FormData()
           fd.append('image', blob, fname)
@@ -305,7 +369,7 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
           const result = await window.electron.extensions.runProcess(
             extId,
             { filePath: nodeInputPath, text: nodeInputText, nodeId },
-            node.data.params as Record<string, unknown>,
+            liveParams as Record<string, unknown>,
           )
           if (!result.success) throw new Error(result.error ?? 'Process extension failed')
           nodeInputPath = result.result?.filePath ?? nodeInputPath
@@ -330,6 +394,11 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
             outputUrl: `/workspace/${norm.slice(workspaceDir.length).replace(/^\//, '')}`,
           })
         }
+
+        // ── While container → end-of-body: auto-loop, or pause for Continue/Retry ──
+        const jump = await handleLoopEnd(i)
+        if (jump === 'cancel') { set({ runState: IDLE, activeNodeId: null }); return }
+        if (jump !== undefined) { i = jump - 1; continue }
       }
 
       // ── Collect image outputs for preview nodes ───────────────────────
@@ -417,5 +486,14 @@ export const useWorkflowRunStore = create<WorkflowRunStore>((set) => ({
 
   continueRun() {
     flushResume()
+  },
+
+  retryRun() {
+    _retry.current = true
+    flushResume()
+  },
+
+  setLiveNodeParams(nodeId, params) {
+    _liveParams.current.set(nodeId, params)
   },
 }))
