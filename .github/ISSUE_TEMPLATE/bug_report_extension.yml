@@ -10,6 +10,7 @@ body:
         This form is only for bugs in **official extensions** shipped with Modly.
         For core app bugs, use the regular *Bug report* instead.
         - Search existing issues — your problem may already be reported or fixed in the dev branch.
+        - Try to **repair** the extension, or **uninstall and reinstall** it — this fixes most issues.
         - For usage questions, join the [Discord Chat](https://discord.gg/T7uQJWnNgr).
   - type: input
     id: extension
