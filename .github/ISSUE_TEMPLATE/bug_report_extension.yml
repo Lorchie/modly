@@ -18,7 +18,7 @@ body:
     attributes:
       label: Which official extension?
       description: Name of the official extension affected.
-      placeholder: e.g. mesh-optimizer
+      placeholder: e.g. modly-hunyuan3d-mini-extension
     validations:
       required: true
   - type: textarea
