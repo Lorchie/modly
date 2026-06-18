@@ -43,6 +43,14 @@ body:
       placeholder: Windows 11 / macOS 14 (arm64) / Ubuntu 24.04
     validations:
       required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: Which GPU are you using? (Modly runs locally on your GPU)
+      placeholder: e.g. NVIDIA RTX 4070 / Apple M3 / AMD RX 7800 XT
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:
