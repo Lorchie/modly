@@ -11,17 +11,12 @@ body:
         For core app bugs, use the regular *Bug report* instead.
         - Search existing issues — your problem may already be reported or fixed in the dev branch.
         - For usage questions, join the [Discord Chat](https://discord.gg/T7uQJWnNgr).
-  - type: dropdown
+  - type: input
     id: extension
     attributes:
       label: Which official extension?
-      options:
-        - material-adjust
-        - mesh-exporter
-        - mesh-optimizer
-        - mesh-remesher
-        - mesh-repair
-        - mesh-smoother
+      description: Name of the official extension affected.
+      placeholder: e.g. mesh-optimizer
     validations:
       required: true
   - type: textarea
